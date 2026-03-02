@@ -1,0 +1,25 @@
+# Python caches and environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Deep Learning weights (CRITICAL to ignore)
+*.pth
+*.pt
+*.ckpt
+checkpoints/
+
+# Datasets and generated images
+data/
+results/
+*.jpg
+*.jpeg
+*.png
+
+# Windows/IDE specific
+Thumbs.db
+.vscode/
+.idea/
