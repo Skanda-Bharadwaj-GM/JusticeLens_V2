@@ -1,22 +1,15 @@
-# Use an official PyTorch base image with CUDA support
-FROM pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime
+# 1. Start with the newer PyTorch 2.4 image to satisfy Hugging Face
+FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
 
-# Set the working directory inside the container
+# 2. Set the working directory inside the container
 WORKDIR /app
 
-# Install system dependencies required for OpenCV/Image processing
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy your requirements and install them
+# 3. Copy your requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of your project files
-COPY src/ src/
-COPY train_cloud.py .
+# 4. Copy ALL your project files (This ensures 'src' and 'train_cloud.py' are included)
+COPY . .
 
-# Command to run when the container starts
+# 5. Tell the container what to do when it wakes up
 CMD ["python", "train_cloud.py"]
