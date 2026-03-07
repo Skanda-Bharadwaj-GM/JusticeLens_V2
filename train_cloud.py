@@ -1,5 +1,5 @@
 import os
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, hf_hub_download
 import zipfile
 import torch
 import torch.nn as nn
@@ -16,6 +16,7 @@ from src.data.deblur_dataset import DocumentDeblurDataset
 GDRIVE_URL = "https://drive.google.com/file/d/1Q7GEYmjTptog4hZD0UXFnmc5DJsPoMI9/view?usp=drive_link" 
 ZIP_NAME = "justice_lens_data.zip"
 EXTRACT_DIR = "." # Extracts directly into the current directory
+REPO_ID = "skandab17/justice-lens-weights" # Centralized your repo ID here
 
 def setup_cloud_data():
     print("[*] Downloading dataset from Google Drive...")
@@ -34,28 +35,59 @@ def train_cloud():
     print(f"[*] Initializing Cloud Training on: {device}")
     
     # We can push the batch size higher on a cloud GPU (e.g., 24GB VRAM)
-    BATCH_SIZE = 4           
-    ACCUMULATION_STEPS = 2   
-    EPOCHS = 5
+    BATCH_SIZE = 1           
+    ACCUMULATION_STEPS = 8  
+    EPOCHS = 25 # UPGRADED TO 25 EPOCHS
     LR = 1e-4 
     
     processor = Swin2SRImageProcessor()
     model = get_pretrained_deblur_model().to(device)
     
+    # --- THE BRAIN SURGERY (UNFREEZING DEEP LAYERS) ---
+    print("[*] Initiating Deep Layer Unfreezing...")
+    # 1. Freeze everything first to establish a baseline
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # 2. Wake up the final transformer block and upsampling layers
+    for name, param in model.named_parameters():
+        if "layers.3" in name or "conv_after_body" in name or "upsample" in name:
+            param.requires_grad = True
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"[*] Upgraded Trainable Parameters: {trainable_params:,}")
+    # ---------------------------------------------------
+
+    # --- ANTI-PREEMPTION RESUME ---
+    print("[*] Checking Hugging Face for interrupted checkpoints...")
+    hf_token = os.environ.get("HF_TOKEN")
+    try:
+        # If a node died mid-training, the new node will download the last save state here
+        checkpoint_path = hf_hub_download(repo_id=REPO_ID, filename="lens_cloud_latest_checkpoint.pth", token=hf_token)
+        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        print("[*] SUCCESS: Checkpoint found! Resuming from previous state.")
+    except Exception:
+        print("[*] No checkpoint found on Hugging Face. Starting fresh.")
+    # ------------------------------
+
     # Using 512 for maximum resolution context
     dataset = DocumentDeblurDataset(
         blur_dir='data/blur_docs', 
         sharp_dir='data/sharp_docs', 
         processor=processor,
-        patch_size=512 
+        patch_size=256 
     )
     
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+    
+    # Optimizer must be initialized AFTER unfreezing layers so it tracks the newly active weights
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LR)
     criterion = nn.L1Loss()
     
     os.makedirs('/app/checkpoints', exist_ok=True) # Cloud absolute path for outputs
     
+    api = HfApi() # Initialize API once for the whole loop
+
     model.train()
     for epoch in range(EPOCHS):
         total_loss = 0
@@ -85,6 +117,26 @@ def train_cloud():
             total_loss += actual_loss
             loop.set_description(f"Epoch [{epoch+1}/{EPOCHS}]")
             loop.set_postfix(loss=actual_loss)
+
+            # --- ANTI-PREEMPTION CLOUD SAVE (MID-EPOCH) ---
+            # Every 500 batches, securely back up the model to Hugging Face
+            if idx % 500 == 0 and idx > 0:
+                print(f"\n[*] Anti-Preemption Triggered: Securing checkpoint at batch {idx}...")
+                checkpoint_filename = "/app/checkpoints/lens_cloud_latest_checkpoint.pth"
+                torch.save(model.state_dict(), checkpoint_filename)
+                
+                try:
+                    api.upload_file(
+                        path_or_fileobj=checkpoint_filename,
+                        path_in_repo="lens_cloud_latest_checkpoint.pth",
+                        repo_id=REPO_ID,
+                        token=hf_token,
+                        repo_type="model"
+                    )
+                    print("[*] Mid-epoch checkpoint successfully secured in the cloud.")
+                except Exception as e:
+                    print(f"[!] Failed to upload checkpoint: {e}")
+            # ----------------------------------------------
             
         print(f"[*] Epoch {epoch+1} Average Loss: {total_loss/len(loader):.4f}")
         # Save locally in the container
@@ -94,12 +146,11 @@ def train_cloud():
         # Upload directly to Hugging Face
         print("[*] Uploading checkpoint to Hugging Face...")
         try:
-            api = HfApi()
             api.upload_file(
                 path_or_fileobj=save_path,
                 path_in_repo=f"lens_cloud_ep{epoch+1}.pth",
-                repo_id="skandab17/justice-lens-weights", # <-- Put your HF username here
-                token=os.environ.get("HF_TOKEN") # We will securely pass this in Salad
+                repo_id=REPO_ID, 
+                token=hf_token 
             )
             print("[*] Upload successful!")
         except Exception as e:
