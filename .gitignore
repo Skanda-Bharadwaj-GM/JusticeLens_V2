@@ -13,11 +13,7 @@ env/
 checkpoints/
 
 # Datasets and generated images
-data/
-results/
-*.jpg
-*.jpeg
-*.png
+
 
 # Windows/IDE specific
 Thumbs.db
@@ -25,3 +21,8 @@ Thumbs.db
 .idea/
 .safetensors
 .bin
+
+# Ignore Datasets and Zips
+justice_lens_data.zip
+data/
+*.zip
