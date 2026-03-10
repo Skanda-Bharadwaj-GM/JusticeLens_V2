@@ -23,3 +23,5 @@ results/
 Thumbs.db
 .vscode/
 .idea/
+.safetensors
+.bin

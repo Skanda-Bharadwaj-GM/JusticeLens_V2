@@ -67,7 +67,7 @@ if __name__ == "__main__":
     
     # Ensure this matches an actual file in your blur_docs folder!
     TEST_IMAGE_PATH = 'data/blur_docs/X51008164969.jpg' 
-    OUTPUT_IMAGE_PATH = 'results/restored_test2.jpg'
+    OUTPUT_IMAGE_PATH = 'results/restored_test3.jpg'
     
     # Pointing to the final trained weights
     CHECKPOINT_PATH = 'checkpoints/lens_audit_deblur_ep10.pth'
