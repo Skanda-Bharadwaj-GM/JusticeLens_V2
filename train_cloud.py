@@ -37,7 +37,7 @@ def train_cloud():
     # We can push the batch size higher on a cloud GPU (e.g., 24GB VRAM)
     BATCH_SIZE = 1           
     ACCUMULATION_STEPS = 8  
-    EPOCHS = 25 # UPGRADED TO 25 EPOCHS
+    EPOCHS = 15 # UPGRADED TO 25 EPOCHS
     LR = 1e-4 
     
     processor = Swin2SRImageProcessor()

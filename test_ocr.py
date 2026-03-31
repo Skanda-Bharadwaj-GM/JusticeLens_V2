@@ -12,8 +12,8 @@ REPO_ID = "skandab17/justice-lens-weights"
 
 # We are grabbing the absolute final save state before the credits ran out
 CHECKPOINT_FILE = "lens_cloud_latest_checkpoint.pth" 
-TEST_IMAGE = "0066617_blur.png"
-OUTPUT_IMAGE = "restored_ocr_test.png"
+TEST_IMAGE = "new.png"
+OUTPUT_IMAGE = "restored_ocr_clear8.jpg"
 
 # Windows users ONLY: Uncomment and update this path if pytesseract throws a "Not Found" error
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
