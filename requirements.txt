@@ -1,10 +1,9 @@
-transformers
-tqdm
-pillow
-gdown
 torch
 torchvision
 transformers
 tqdm
 pillow
 gdown
+streamlit
+huggingface_hub
+pytesseract

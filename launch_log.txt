@@ -1,0 +1,2 @@
+[09-04-2026 22:01:47.51] Starting Justice Lens app 
+[09-04-2026 22:01:47.51] PYTHONUNBUFFERED=1 
