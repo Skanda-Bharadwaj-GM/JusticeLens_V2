@@ -5,8 +5,8 @@ from skimage.metrics import peak_signal_noise_ratio as compare_psnr
 from skimage.metrics import structural_similarity as compare_ssim
 
 # --- CONFIGURATION ---
-RESTORED_IMG_PATH = "restored_ocr_clear.jpg"  # The image your AI output
-SHARP_IMG_PATH = "0066645_orig.png"    # The original, perfectly clear image
+RESTORED_IMG_PATH = r"0000008_blur_20260422_102649_restored.jpg"  # The image your AI output
+SHARP_IMG_PATH = r"0000008_orig.png"    # The original, perfectly clear image
 # ---------------------
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 

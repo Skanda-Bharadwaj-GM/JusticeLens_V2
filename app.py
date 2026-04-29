@@ -15,7 +15,9 @@ HF_WEIGHTS_FILENAME = "lens_cloud_latest_checkpoint.pth"
 OUTPUT_DIR = Path("results/webapp_runs")
 UPLOAD_DIR = OUTPUT_DIR / "uploads"
 RESTORED_DIR = OUTPUT_DIR / "restored"
+# Longest image side after resize. Lower on CUDA to reduce VRAM (Swin2SR attention is memory-heavy).
 MAX_IMAGE_SIZE = 512
+MAX_IMAGE_SIZE_CUDA = 384
 WIN_TESSERACT_DEFAULT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 
@@ -60,6 +62,16 @@ def get_device_name() -> str:
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def get_effective_max_image_side(device_name: str) -> int:
+    """Max input side length; override with env JUSTICE_LENS_MAX_IMAGE_SIZE (positive int)."""
+    raw = os.environ.get("JUSTICE_LENS_MAX_IMAGE_SIZE", "").strip()
+    if raw.isdigit():
+        return max(64, min(int(raw), 2048))
+    if device_name == "cuda":
+        return MAX_IMAGE_SIZE_CUDA
+    return MAX_IMAGE_SIZE
 
 
 def _checkpoint_mtime(path: str) -> float:
@@ -140,14 +152,38 @@ def load_pipeline(
     return processor, model, status_msg
 
 
-def prepare_image(image: Image.Image) -> Image.Image:
+def prepare_image(image: Image.Image, max_side: Optional[int] = None) -> Image.Image:
     image = image.convert("RGB")
-    if max(image.size) <= MAX_IMAGE_SIZE:
+    cap = max_side if max_side is not None else MAX_IMAGE_SIZE
+    if max(image.size) <= cap:
         return image
 
     # Keep aspect ratio and cap dimensions to avoid out-of-memory issues.
-    image.thumbnail((MAX_IMAGE_SIZE, MAX_IMAGE_SIZE))
+    image.thumbnail((cap, cap))
     return image
+
+
+def _forward_deblur(
+    resized_image: Image.Image,
+    processor,
+    model,
+    device_name: str,
+) -> Image.Image:
+    import torch
+
+    inputs = processor(images=resized_image, return_tensors="pt")
+    pixel_values = inputs.pixel_values.to(device_name)
+
+    with torch.inference_mode():
+        if device_name == "cuda":
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                outputs = model(pixel_values=pixel_values)
+        else:
+            outputs = model(pixel_values=pixel_values)
+
+    output_tensor = outputs.reconstruction.squeeze(0).detach().float().cpu().clamp(0, 1)
+    output_array = (output_tensor.permute(1, 2, 0).numpy() * 255.0).astype(np.uint8)
+    return Image.fromarray(output_array)
 
 
 def deblur_image(
@@ -158,16 +194,38 @@ def deblur_image(
 ) -> Image.Image:
     import torch
 
-    resized_image = prepare_image(image)
-    inputs = processor(images=resized_image, return_tensors="pt")
-    pixel_values = inputs.pixel_values.to(device_name)
+    base = get_effective_max_image_side(device_name)
+    fallbacks = [384, 320, 256, 224, 192]
+    ordered = [base] + [s for s in fallbacks if s < base]
+    seen: set[int] = set()
+    sizes: list[int] = []
+    for s in ordered:
+        if s not in seen:
+            seen.add(s)
+            sizes.append(s)
 
-    with torch.no_grad():
-        outputs = model(pixel_values=pixel_values)
+    last_err: Optional[BaseException] = None
+    for max_side in sizes:
+        resized_image = prepare_image(image, max_side=max_side)
+        if device_name == "cuda" and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        try:
+            return _forward_deblur(resized_image, processor, model, device_name)
+        except torch.OutOfMemoryError as e:
+            last_err = e
+            if device_name == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            continue
 
-    output_tensor = outputs.reconstruction.squeeze(0).detach().cpu().clamp(0, 1)
-    output_array = (output_tensor.permute(1, 2, 0).numpy() * 255.0).astype(np.uint8)
-    return Image.fromarray(output_array)
+    if last_err is not None:
+        raise RuntimeError(
+            "CUDA ran out of memory even after shrinking the input. "
+            "Close other GPU apps, set JUSTICE_LENS_MAX_IMAGE_SIZE to a smaller value (e.g. 256), "
+            "or run on CPU by setting CUDA_VISIBLE_DEVICES empty before starting Streamlit."
+        ) from last_err
+    raise RuntimeError("Deblur failed unexpectedly.")
+
+
 
 
 def save_result_images(uploaded_bytes: bytes, uploaded_name: str, restored_img: Image.Image):
@@ -247,6 +305,11 @@ def main():
     with st.sidebar:
         st.header("Inference Setup")
         st.write(f"Device: `{device_name}`")
+        if device_name == "cuda":
+            st.caption(
+                f"Input is resized to max side **{get_effective_max_image_side(device_name)}** px on GPU "
+                f"(set env `JUSTICE_LENS_MAX_IMAGE_SIZE` to change). OOM retries use smaller sizes."
+            )
         use_custom_weights = st.toggle("Use custom checkpoint", value=True)
         checkpoint_path = st.text_input("Local checkpoint path", value=DEFAULT_CHECKPOINT)
         st.caption("Matches `download_weights.py`: saved under `models/`.")

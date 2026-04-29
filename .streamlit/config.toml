@@ -1,0 +1,4 @@
+# Avoid Streamlit's default watcher walking `torch.classes`, which triggers PyTorch
+# proxy errors ("__path__._path") and noisy tracebacks on Windows.
+[server]
+fileWatcherType = "none"
